@@ -35,6 +35,7 @@ typedef struct {
 } BTB;
 
 
+
 BTB* Predictor_Table;
 SIM_stats* Predictor_Stats;
 
@@ -217,6 +218,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	}*/
 	for(unsigned i=0;i<HISTS_NUM;i++){
 		Predictor_Table->history[i] = (bool*)malloc(sizeof(bool)*historySize);
+		for(unsigned j = 0 ;j<Predictor_Table->historySize;j++) Predictor_Table->history[i][j] =0;
 			//if(Predictor_Table->history[i] == NULL){
 			/*printf("memory allocation failed!");
 
@@ -247,7 +249,7 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 	int fsm_index;
 	int fsm_ex_index;
 	int end = log2(Predictor_Table->btbSize)+1;
-	int index = BinaryToDecimal(PC_addrs,32-end-2,29);
+	int index = BinaryToDecimal(PC_addrs,32-end-1,29);
 	int history_index ;
 	if(Predictor_Table->tables_type == LOCAL_TABLES){
 		fsm_ex_index = index;
@@ -258,12 +260,16 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 	if(Predictor_Table->valid[index]){
 
 		//printf("this pc is valid : %d and index is %d \n",pc,index); //debug
-		for(unsigned i=32-end , j=Predictor_Table->tagSize-1 ; (i< 32-end - Predictor_Table->tagSize)&&j>=0 ; i-- , j--){
+		/*for(unsigned i=32-end , j=Predictor_Table->tagSize-1 ; (i> 32-end - Predictor_Table->tagSize)&&j>=0 ; i-- , j--){
 
+			printf("i is %d and j is %d\n",i ,j);
 			if(PC_addrs[i] != Predictor_Table->tag[j]){
 				found = false;
 				break;
 			}
+		}*/
+		if(BinaryToDecimal(PC_addrs,29-log2(Predictor_Table->btbSize)-Predictor_Table->tagSize+1,29-log2(Predictor_Table->btbSize))!= Predictor_Table->tag[index]){
+			found = false;
 		}
 
 	}
@@ -301,7 +307,7 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 			
 		}
 		else{
-			fsm_index = BinaryToDecimal(Predictor_Table->history[index],0,Predictor_Table->historySize);
+			fsm_index = BinaryToDecimal(Predictor_Table->history[history_index],0,Predictor_Table->historySize-1);
 			//printf("fsm state is : %d%d",Predictor_Table->FSM[fsm_ex_index][fsm_index][0],Predictor_Table->FSM[fsm_ex_index][fsm_index][1]);
 			if(Predictor_Table->FSM[fsm_ex_index][fsm_index][0]){
 				*dst = Predictor_Table->target[index];
@@ -337,39 +343,32 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
 	else history_index = index;
 	
 	if(Predictor_Table->Shared == using_share_lsb){
-		fsm_index = BinaryToDecimal(PC_addrs,29-Predictor_Table->historySize+1,29) ^ BinaryToDecimal(Predictor_Table->history[history_index],0,Predictor_Table->historySize) ;
+		fsm_index = BinaryToDecimal(PC_addrs,29-Predictor_Table->historySize+1,29) ^ BinaryToDecimal(Predictor_Table->history[history_index],0,Predictor_Table->historySize-1) ;
 		
 	}
 	else if(Predictor_Table->Shared == using_share_mid){
-		fsm_index = BinaryToDecimal(PC_addrs,16-Predictor_Table->historySize+1,16) ^ BinaryToDecimal(Predictor_Table->history[history_index],0,Predictor_Table->historySize);
+		fsm_index = BinaryToDecimal(PC_addrs,16-Predictor_Table->historySize+1,16) ^ BinaryToDecimal(Predictor_Table->history[history_index],0,Predictor_Table->historySize-1);
 		
 	}
 	else{
-		fsm_index = BinaryToDecimal(Predictor_Table->history[index],0,Predictor_Table->historySize);
+		fsm_index = BinaryToDecimal(Predictor_Table->history[history_index],0,Predictor_Table->historySize-1);
 		
 	}
-
 	if(Predictor_Table->valid[index]){
 
-		for(unsigned i=29-end+1 , j=Predictor_Table->tagSize-1 ; (i< 29-end +1 - Predictor_Table->tagSize +1)&&j>=0 ; i-- , j--){
-			
-
-			//printf("%u %u\n",PC_addrs[i],Predictor_Table->tag[j]); //debug
-			if(PC_addrs[i] != Predictor_Table->tag[j]){
-				found = false;
-				break;
-			}
+		if(BinaryToDecimal(PC_addrs,29-log2(Predictor_Table->btbSize)-Predictor_Table->tagSize+1 ,29-log2(Predictor_Table->btbSize))!= Predictor_Table->tag[index]){
+			found = false;
 		}
 
 	}
 	if(!Predictor_Table->valid[index] || !found){
-		Predictor_Table->tag[index] = BinaryToDecimal(PC_addrs,29-end+1-Predictor_Table->tagSize+1,29-end+1 );
+		Predictor_Table->tag[index] = BinaryToDecimal(PC_addrs,29-end+1-Predictor_Table->tagSize+1 , 29-end+1);
 		Predictor_Table->target[index] = targetPc;
 		//printf("being add to table , pc is :%d with targetpc : %d\n",pc,targetPc);
 		//printf("%d\n",targetPc); //debug
 		if(Predictor_Table->hist_type != GLOBAL_HIST){
 			for(unsigned i=0 ; i<Predictor_Table->historySize;i++)
-				Predictor_Table->history[index][i] = 0;
+				Predictor_Table->history[history_index][i] = 0;
 		}
 		if(Predictor_Table->tables_type != GLOBAL_TABLES){
 
@@ -392,7 +391,6 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
 		}
 		Predictor_Table->history[history_index][Predictor_Table->historySize-1] = taken;
 		int NewState ;
-		printf("fsm_index is %d and fsm_ex_index is %d num is %d%d \n",fsm_index,fsm_ex_index,Predictor_Table->FSM[fsm_ex_index][fsm_index][0],Predictor_Table->FSM[fsm_ex_index][fsm_index][1]);
 		if(taken) NewState = (BinaryToDecimal(Predictor_Table->FSM[fsm_ex_index][fsm_index],0,1) +  1 ) >=3 ? 3 : (BinaryToDecimal(Predictor_Table->FSM[fsm_ex_index][fsm_index],0,1) +  1 );
 		else NewState = (BinaryToDecimal(Predictor_Table->FSM[fsm_ex_index][fsm_index],0,1) - 1) <= 0 ? 0 : (BinaryToDecimal(Predictor_Table->FSM[fsm_ex_index][fsm_index],0,1) - 1);
 		//printf("new state is %d prev state is %d%d\n",NewState,Predictor_Table->FSM[fsm_ex_index][fsm_index][0],Predictor_Table->FSM[fsm_ex_index][fsm_index][1]);
